@@ -61,6 +61,7 @@ const verifyStateMatchFlow = ai.defineFlow(
     name: 'verifyStateMatchFlow',
     inputSchema: VerifyStateMatchInputSchema,
     outputSchema: VerifyStateMatchOutputSchema,
+    retries: 3,
   },
   async input => {
     const {output} = await prompt(input);

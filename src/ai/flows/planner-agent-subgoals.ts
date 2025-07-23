@@ -49,6 +49,7 @@ const plannerAgentSubgoalsFlow = ai.defineFlow(
     name: 'plannerAgentSubgoalsFlow',
     inputSchema: PlannerAgentSubgoalsInputSchema,
     outputSchema: PlannerAgentSubgoalsOutputSchema,
+    retries: 3,
   },
   async input => {
     const {output} = await plannerAgentSubgoalsPrompt(input);
