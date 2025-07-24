@@ -18,3 +18,8 @@ export type LogEntry = {
   status: 'success' | 'failure' | 'info';
   timestamp: string;
 }
+
+export type VerificationResult = {
+  stateMatchesExpectation: boolean;
+  reasoning: string;
+}
