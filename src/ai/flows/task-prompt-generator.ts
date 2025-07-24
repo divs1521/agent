@@ -42,7 +42,14 @@ const generateTaskPromptFlow = ai.defineFlow(
     name: 'generateTaskPromptFlow',
     inputSchema: GenerateTaskPromptInputSchema,
     outputSchema: GenerateTaskPromptOutputSchema,
-    retries: 3,
+    retry: {
+      backoff: {
+        jitter: 'full',
+        maxRetries: 5,
+        duration: '2s',
+        factor: 2,
+      },
+    },
   },
   async input => {
     const {output} = await prompt(input);

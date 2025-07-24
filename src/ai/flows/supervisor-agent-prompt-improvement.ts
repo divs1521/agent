@@ -53,7 +53,14 @@ const supervisorAgentPromptImprovementFlow = ai.defineFlow(
     name: 'supervisorAgentPromptImprovementFlow',
     inputSchema: SupervisorAgentPromptImprovementInputSchema,
     outputSchema: SupervisorAgentPromptImprovementOutputSchema,
-    retries: 3,
+    retry: {
+      backoff: {
+        jitter: 'full',
+        maxRetries: 5,
+        duration: '2s',
+        factor: 2,
+      },
+    },
   },
   async input => {
     const {output} = await prompt(input);
