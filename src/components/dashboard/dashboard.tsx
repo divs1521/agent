@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { GanttChartSquare, PlayCircle, ShieldCheck, ClipboardCheck, Loader2 } from 'lucide-react';
+import { GanttChartSquare, PlayCircle, ClipboardCheck, Loader2, Microscope } from 'lucide-react';
 import type { Agent, LogEntry, AgentStatus } from '@/lib/types';
 import { generateSubgoals } from '@/ai/flows/planner-agent-subgoals';
-import { verifyStateMatch } from '@/ai/flows/verifier-agent-state-match';
-import { supervisorAgentPromptImprovement } from '@/ai/flows/supervisor-agent-prompt-improvement';
+import { analyzeTestEpisode } from '@/ai/flows/analysis-agent-flow';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,18 +34,10 @@ const initialAgents: Record<string, Agent> = {
     output: null,
     error: null,
   },
-  verifier: {
-    name: 'Verifier Agent',
-    description: 'Verifies UI state after each action and detects bugs.',
-    icon: ShieldCheck,
-    status: 'idle',
-    output: null,
-    error: null,
-  },
-  supervisor: {
-    name: 'Supervisor Agent',
-    description: 'Reviews the full test episode and suggests improvements.',
-    icon: ClipboardCheck,
+  analysis: {
+    name: 'Analysis Agent',
+    description: 'Verifies all steps, detects bugs, and suggests test improvements.',
+    icon: Microscope,
     status: 'idle',
     output: null,
     error: null,
@@ -90,61 +81,67 @@ export default function Dashboard() {
     setIsLoading(true);
     resetState();
     
+    let currentLog: LogEntry[] = [];
+    const addToCurrentLog = (entry: Omit<LogEntry, 'step' | 'timestamp'>) => {
+      const newEntry = { ...entry, step: currentLog.length + 1, timestamp: new Date().toLocaleTimeString() };
+      currentLog.push(newEntry);
+      setLog([...currentLog]);
+    };
+
     try {
       // 1. Planner Agent
       updateAgentState('planner', 'running', {});
-      addLogEntry({ agent: 'System', details: 'Starting test...', status: 'info' });
-      addLogEntry({ agent: 'Planner', details: `Generating plan for goal: "${goal}"`, status: 'info' });
+      addToCurrentLog({ agent: 'System', details: 'Starting test...', status: 'info' });
+      addToCurrentLog({ agent: 'Planner', details: `Generating plan for goal: "${goal}"`, status: 'info' });
       const planResult = await generateSubgoals({ testGoal: goal });
       const subgoals = planResult.subgoals;
       updateAgentState('planner', 'completed', { output: subgoals });
-      addLogEntry({ agent: 'Planner', details: `Generated ${subgoals.length} subgoals.`, status: 'success' });
+      addToCurrentLog({ agent: 'Planner', details: `Generated ${subgoals.length} subgoals.`, status: 'success' });
       
-      // 2. Executor & Verifier Loop
-      let testFailed = false;
+      // 2. Executor Loop
+      updateAgentState('executor', 'running', { output: `Starting execution of ${subgoals.length} subgoals...` });
       for (const [index, subgoal] of subgoals.entries()) {
-        // Executor
-        updateAgentState('executor', 'running', { output: `Executing: ${subgoal}` });
-        addLogEntry({ agent: 'Executor', details: `Executing subgoal ${index + 1}: ${subgoal}`, status: 'info' });
-        await new Promise(res => setTimeout(res, 1500)); // Simulate execution time
-        updateAgentState('executor', 'completed', { output: `Completed: ${subgoal}`});
-        addLogEntry({ agent: 'Executor', details: `Subgoal ${index + 1} executed.`, status: 'success' });
-        
-        // Verifier
-        updateAgentState('verifier', 'running', { output: `Verifying state for: ${subgoal}` });
-        addLogEntry({ agent: 'Verifier', details: `Verifying step ${index + 1}...`, status: 'info' });
-        const verificationResult = await verifyStateMatch({
-            plannerGoal: subgoal,
-            executorResult: "Action successful",
-            uiState: `{"screen": "MockScreen", "element_visible": true}`,
-            expectedState: `{"screen": "MockScreen", "element_visible": true}`
-        });
-        updateAgentState('verifier', 'completed', { output: verificationResult.reasoning });
-        
-        if (!verificationResult.stateMatchesExpectation || verificationResult.functionalBugDetected) {
-            addLogEntry({ agent: 'Verifier', details: `Verification failed. Bug detected: ${verificationResult.reasoning}`, status: 'failure' });
-            testFailed = true;
-            break;
-        } else {
-            addLogEntry({ agent: 'Verifier', details: 'Verification passed.', status: 'success' });
-        }
+        addToCurrentLog({ agent: 'Executor', details: `Executing subgoal ${index + 1}/${subgoals.length}: ${subgoal}`, status: 'info' });
+        await new Promise(res => setTimeout(res, 1000)); // Simulate execution time
+        addToCurrentLog({ agent: 'Executor', details: `Mock UI state after executing: ${subgoal}`, status: 'info' });
       }
+      updateAgentState('executor', 'completed', { output: `Completed all ${subgoals.length} subgoals.`});
+      addToCurrentLog({ agent: 'Executor', details: `All subgoals executed.`, status: 'success' });
 
-      // 3. Supervisor Agent
-      updateAgentState('supervisor', 'running', {});
-      const fullLogText = log.map(l => `[${l.timestamp}] ${l.agent}: ${l.details}`).join('\n');
-      addLogEntry({ agent: 'Supervisor', details: 'Reviewing full test episode...', status: 'info' });
-      const supervisorResult = await supervisorAgentPromptImprovement({ testEpisode: fullLogText });
-      updateAgentState('supervisor', 'completed', { output: supervisorResult.suggestedImprovements });
-      addLogEntry({ agent: 'Supervisor', details: 'Review complete. Suggestions provided.', status: 'success' });
+      // 3. Analysis Agent
+      updateAgentState('analysis', 'running', {});
+      const fullLogText = currentLog.map(l => `[${l.timestamp}] ${l.agent}: ${l.details}`).join('\n');
+      addToCurrentLog({ agent: 'Analysis', details: 'Reviewing full test episode...', status: 'info' });
+      const analysisResult = await analyzeTestEpisode({ testGoal: goal, fullLog: fullLogText });
+      
+      const analysisOutput = [
+        `Overall Verdict: ${analysisResult.overallVerdict}`,
+        '---',
+        'Verification Details:',
+        ...analysisResult.verificationResults.map(v => `- ${v.subgoal}: ${v.stateMatchesExpectation ? 'Passed' : 'Failed'} (${v.reasoning})`),
+        '---',
+        'Suggested Improvements:',
+        analysisResult.suggestedImprovements,
+      ];
+      updateAgentState('analysis', 'completed', { output: analysisOutput });
 
-      addLogEntry({ agent: 'System', details: `Test run ${testFailed ? 'failed' : 'completed'}.`, status: testFailed ? 'failure' : 'success' });
+      analysisResult.verificationResults.forEach((v, i) => {
+        addToCurrentLog({ 
+          agent: 'Analysis', 
+          details: `Verification for "${v.subgoal}": ${v.reasoning}`, 
+          status: v.stateMatchesExpectation ? 'success' : 'failure' 
+        });
+      });
+      addToCurrentLog({ agent: 'Analysis', details: `Overall Verdict: ${analysisResult.overallVerdict}. ${analysisResult.suggestedImprovements}`, status: 'info' });
+      
+      const testFailed = analysisResult.overallVerdict !== 'Passed';
+      addToCurrentLog({ agent: 'System', details: `Test run ${testFailed ? 'failed' : 'completed'}.`, status: testFailed ? 'failure' : 'success' });
       toast({ title: 'Test Complete', description: `The test run has ${testFailed ? 'failed' : 'completed'}.` });
 
     } catch (error) {
       console.error(error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-      addLogEntry({ agent: 'System', details: `An error occurred: ${errorMessage}`, status: 'failure' });
+      addToCurrentLog({ agent: 'System', details: `An error occurred: ${errorMessage}`, status: 'failure' });
       toast({ title: 'An Error Occurred', description: 'The test run was aborted. Check logs for details.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
@@ -184,11 +181,10 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-3">
                 <AgentCard agent={agents.planner} />
                 <AgentCard agent={agents.executor} />
-                <AgentCard agent={agents.verifier} />
-                <AgentCard agent={agents.supervisor} />
+                <AgentCard agent={agents.analysis} />
               </div>
               
               <ResultsLog log={log} />
